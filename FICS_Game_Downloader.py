@@ -1,12 +1,11 @@
 import requests
 from bs4 import BeautifulSoup
-import chess
-import chess.pgn
 import bz2
 import os
 
-class FICSGameDownloader:
+class FICS_Game_Downloader:
     def __init__(self):
+        #https://www.ficsgames.org/download.html -> for formatting
         self.base_url = "https://www.ficsgames.org/cgi-bin/download.cgi"
         
     def download_games(self, game_type = 4, player = '', year = 2022, month = 0, move_times = 0, 
@@ -108,32 +107,11 @@ class FICSGameDownloader:
             print(f'Failed to download file. Status code: {game_bz2.status_code}')
 
 
-          
-    def generate_board_image(self, game, move_number=None):
-        """
-        Generate an SVG image of the board at a specific move number
-        If move_number is None, generates final position
-        """
-        board = game.board()
-        
-        if move_number is not None:
-            for i, move in enumerate(game.mainline_moves()):
-                if i >= move_number:
-                    break
-                board.push(move)
-                
-        return chess.svg.board(board=board)
 
 # Example usage
 if __name__ == "__main__":
-    downloader = FICSGameDownloader()
+    downloader = FICS_Game_Downloader()
     
-    games = downloader.download_games(game_type=4,year=2022)
-    
-    print(games)
+    games = downloader.download_games(game_type=3,year=2022, month = 2)
+    games = downloader.download_games(game_type=4,year=2023, month = 12)
 
-""" # Generate SVG for each game's final position
-    for i, game in enumerate(games):
-    svg_data = downloader.generate_board_image(game)
-    with open(f"game_{i}_final.svg", "w") as f:
-        f.write(svg_data)"""
