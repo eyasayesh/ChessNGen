@@ -31,55 +31,85 @@ class Chess_Dataset_Generator:
 
     
     #helper method for getting number of lines
-    def get_total_games(pgn_path):
+    def get_total_games(self, pgn_path):
         # Use wc -l to count lines efficiently
         result = subprocess.run(['wc', '-l', pgn_path], capture_output=True, text=True)
         total_lines = int(result.stdout.split()[0])
         return total_lines // 40
         
     def generate_dataset_from_pgn(self, pgn_path, dataset_name, positions_to_capture="all", 
-                                  max_positions_per_game=None, max_num_games = None, max_games_per_chunk = 1000):
+                                max_positions_per_game=None, max_num_games=None, max_games_per_chunk=1000,
+                                start_game=0):
         """
         Process a PGN file and generate images for specified positions
         
         Args:
             pgn_path (str): Path to PGN file
-            positions_to_capture (str or list): 
-                - "all" for every position
-                - list of move numbers
-                - "first_last" for first and last position
-            max_positions_per_game (int): Maximum positions to capture per game
-            max_number_games: maximum number of games to convert to images
-            max_games_per_chunk: max number of games in one h5 file
+            dataset_name (str): Name for output dataset
+            positions_to_capture (str or list): Positions to capture from each game
+            max_positions_per_game (int): Maximum positions per game
+            max_num_games (int): Maximum number of games to process
+            max_games_per_chunk (int): Maximum games per H5 file
+            start_game (int): Number of games to skip before starting processing
         """
-       
+        
         with open(pgn_path) as pgn_file:
-            game_count = 0
-            chunk_count = 1
             # Set max_num_games based on file size if None
             if max_num_games is None:
                 max_num_games = self.get_total_games(pgn_path)
-
-            with tqdm(total=max_num_games, desc="Processing games",leave=False) as outer_bar:
-                while True:
-                    for chunck in tqdm(range(max_games_per_chunk), 
-                                        total = max_games_per_chunk,
-                                        desc = f"Chunk #{chunk_count}",
-                                        leave = False):
-                            game = chess.pgn.read_game(pgn_file)
-                            if game is None or game_count == max_num_games:  # End of file
-                                break
-                            game_count += 1
-                            game_id = f"game_{game_count}"
+            
+            # Skip initial games if start_game > 0
+            for _ in tqdm(range(start_game), desc=f"Skipping to game {start_game}", leave=False):
+                chess.pgn.read_game(pgn_file)
+            
+            # Calculate total number of chunks needed
+            remaining_games = min(max_num_games, self.get_total_games(pgn_path) - start_game)
+            total_chunks = (remaining_games + max_games_per_chunk - 1) // max_games_per_chunk
+            
+            game_count = start_game
+            chunk_count = 0
+            
+            # Main progress bar for total games
+            with tqdm(total=remaining_games, desc="Total Progress") as outer_bar:
+                while chunk_count < total_chunks:
+                    games_in_chunk = 0
+                    
+                    # Progress bar for current chunk
+                    with tqdm(total=max_games_per_chunk, 
+                            desc=f"Processing Chunk {chunk_count + 1}/{total_chunks}",
+                            leave=False) as chunk_bar:
                         
+                        # Process games for this chunk
+                        while games_in_chunk < max_games_per_chunk:
+                            game = chess.pgn.read_game(pgn_file)
+                            
+                            # Check for end conditions
+                            if game is None or (game_count - start_game) >= max_num_games:
+                                break
+                                
+                            game_count += 1
+                            games_in_chunk += 1
+                            game_id = f"game_{game_count}"
+                            
+                            # Process the game
                             self.process_single_game(game, game_id, positions_to_capture, max_positions_per_game)
+                            
+                            # Update both progress bars
                             outer_bar.update(1)
-                    if game is None or game_count == max_num_games:  # End of file
-                        self.save_dataset(f'{self.output_dir}/{dataset_name}_final_chunk.h5')
+                            chunk_bar.update(1)
+                    
+                    # Save chunk if any games were processed
+                    if games_in_chunk > 0:
+                        if game is None or (game_count - start_game) >= max_num_games:
+                            self.save_dataset(f'{self.output_dir}/{dataset_name}_final_chunk.h5')
+                        else:
+                            self.save_dataset(f'{self.output_dir}/{dataset_name}_chunk_{chunk_count}.h5')
+                        chunk_count += 1
+                    
+                    # Check if we've reached the end
+                    if game is None or (game_count - start_game) >= max_num_games:
                         break
-                    self.save_dataset(f'{self.output_dir}/{dataset_name}_chunk_{chunk_count}.h5')
-                    chunk_count += 1
-                
+                    
     def process_single_game(self, game, game_id, positions_to_capture, max_positions_per_game):
         """Process a single game and generate images"""
         board = game.board()
@@ -161,8 +191,12 @@ class Chess_Dataset_Generator:
 # Example usage
 if __name__ == "__main__":
     generator = Chess_Dataset_Generator(output_dir='~/scratch/vae_chess_data')
-
-    generator.generate_dataset_from_pgn("./game_pgns/ficsgamesdb_2022_standard2000_nomovetimes_403053.pgn",'test',
-                                        max_num_games =14,max_games_per_chunk=3)
+    generator.generate_dataset_from_pgn(
+        "./game_pgns/ficsgamesdb_2022_standard2000_nomovetimes_403053.pgn",
+        'test',
+        max_num_games=14,
+        max_games_per_chunk=3,
+        start_game=1000  # Start from the 1000th game
+    )
     
     

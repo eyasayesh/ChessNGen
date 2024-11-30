@@ -5,7 +5,11 @@
 **/*.gif
 **/*.ipynb
 
+#ignore folders
 **/game_pgns/
+**/errors/
+**/logs/
+
 
 #ignore any test file
 *test*

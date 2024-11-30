@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import h5py
 import numpy as np
 import os
+from PGN_Random_Dataset import PGN_Random_Dataset
 
 def verify_images(h5_file, num_samples=5):
     with h5py.File(h5_file, 'r') as f:
@@ -36,4 +37,5 @@ def save_sample_images(h5_file, num_samples=5, output_dir='sample_images'):
 
 if __name__ == "__main__":
    #verify_images('./vae_chess_images/test.h5', num_samples=5)
-    save_sample_images('./vae_chess_images/test.h5', num_samples=5)
+    save_sample_images('/home/hice1/eayesh3/scratch/vae_datasets/rand_chess_pos_dataset_dataset_0.h5', num_samples=5)
+    print(PGN_Random_Dataset.read_metadata('/home/hice1/eayesh3/scratch/vae_datasets/rand_chess_pos_dataset_dataset_0.h5'))
