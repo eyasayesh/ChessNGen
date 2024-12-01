@@ -9,6 +9,7 @@
 **/game_pgns/
 **/errors/
 **/logs/
+**/wandb
 
 
 #ignore any test file

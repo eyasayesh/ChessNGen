@@ -37,5 +37,5 @@ def save_sample_images(h5_file, num_samples=5, output_dir='sample_images'):
 
 if __name__ == "__main__":
    #verify_images('./vae_chess_images/test.h5', num_samples=5)
-    save_sample_images('/home/hice1/eayesh3/scratch/vae_datasets/rand_chess_pos_dataset_dataset_0.h5', num_samples=5)
-    print(PGN_Random_Dataset.read_metadata('/home/hice1/eayesh3/scratch/vae_datasets/rand_chess_pos_dataset_dataset_0.h5'))
+    save_sample_images('/home/hice1/eayesh3/scratch/vae_datasets/rand_chess_pos_dataset_dataset_7.h5', num_samples=5)
+    print(PGN_Random_Dataset.read_metadata('/home/hice1/eayesh3/scratch/vae_datasets/rand_chess_pos_dataset_dataset_7.h5'))
