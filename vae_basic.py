@@ -45,6 +45,10 @@ class ChessVAE(nn.Module):
     def __init__(self, config: VAEConfig):
         super().__init__()
         self.config = config
+
+        # Initialize model components in BF16 for better compatibility
+        torch.backends.cuda.matmul.allow_tf32 = True  # Enable TF32 for matmul
+        torch.backends.cudnn.allow_tf32 = True  # Enable TF32 for convolutions
         
         # Initialize empty lists for encoder and decoder layers
         encoder_layers = []
@@ -171,7 +175,8 @@ class ChessVAE(nn.Module):
             self.parameters(),
             lr=self.config.max_lr,
             weight_decay=self.config.weight_decay,
-            betas=self.config.adamw_betas
+            betas=self.config.adamw_betas,
+            eps=1e-4  # Increased epsilon for better BF16 stability
         )
         scheduler =  OneCycleLR(
         optimizer,

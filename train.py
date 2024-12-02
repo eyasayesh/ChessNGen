@@ -82,6 +82,9 @@ def train_vae(config: VAEConfig, h5_files, run_name=None, checkpoint_dir="checkp
     
     start_epoch = 0
     best_val_loss = float('inf')
+
+    # Initialize mixed precision scaler
+    scaler = torch.GradScaler("cuda",enabled=True)
     
     # Resume from checkpoint if specified
     if resume_from:
@@ -90,6 +93,8 @@ def train_vae(config: VAEConfig, h5_files, run_name=None, checkpoint_dir="checkp
         model.load_state_dict(checkpoint['model_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
         best_val_loss = checkpoint['best_val_loss']
+        if 'scaler_state_dict' in checkpoint:
+            scaler.load_state_dict(checkpoint['scaler_state_dict'])
     
     # Set up data module
     data_module = Chess_Data_Module(
@@ -124,31 +129,47 @@ def train_vae(config: VAEConfig, h5_files, run_name=None, checkpoint_dir="checkp
             for batch_idx, batch in enumerate(pbar):
                 batch = batch.to(device)
                 
-                # Forward pass
-                recon_batch, mu, log_var = model(batch)
-                
-                # Calculate losses
-                recon_loss = F.mse_loss(recon_batch, batch, reduction='mean')
-                kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=1))
-                loss = recon_loss + config.kld_weight * kld_loss
+                 # Forward pass with mixed precision
+                with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+                    recon_batch, mu, log_var = model(batch)
+                    
+                    # Calculate losses
+                    recon_loss = F.mse_loss(recon_batch, batch, reduction='mean')
+                    kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=1))
+                    loss = recon_loss + config.kld_weight * kld_loss
 
-                # Normalize loss to account for accumulation
-                loss = loss / accumulation_steps  
+                    # Normalize loss to account for accumulation
+                    loss = loss / accumulation_steps  
                 
-                # Backward pass
-                loss.backward()
+                # Backward pass with scaler
+                scaler.scale(loss).backward()
 
                 
                 # Update metrics
                 train_loss += loss.item() * accumulation_steps
                 train_recon_loss += recon_loss.item()
                 train_kld_loss += kld_loss.item()
+
+                # Calculate global step for logging
+                global_step = epoch * len(train_loader) + batch_idx
                 
                 # Step optimization after accumulation
+                scheduler.step()
+
                 if (batch_idx + 1) % accumulation_steps == 0:
-                    optimizer.step()
-                    scheduler.step()
+                     # First unscale gradients so optimizer can work with normal gradients
+                    scaler.unscale_(optimizer)
+                    scaler.step(optimizer)
+                    scaler.update()
                     optimizer.zero_grad()
+
+                # Log metrics after gradient accumulation (optional)
+                wandb.log({
+                    "train/accumulated_batch_loss": train_loss / (batch_idx + 1),
+                    "global_step": global_step,
+                    "epoch": epoch,
+                    "batch": batch_idx
+                }, step=global_step)
 
 
                 # Update progress bar
@@ -169,7 +190,7 @@ def train_vae(config: VAEConfig, h5_files, run_name=None, checkpoint_dir="checkp
         val_recon_loss = 0
         val_kld_loss = 0
         
-        with torch.no_grad():
+        with torch.no_grad(), torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             for batch in val_loader:
                 batch = batch.to(device)
                 recon_batch, mu, log_var = model(batch)
@@ -200,18 +221,19 @@ def train_vae(config: VAEConfig, h5_files, run_name=None, checkpoint_dir="checkp
             "epoch": epoch
         })
         
-        # Log reconstructions every 5 epochs
-        if (epoch + 1) % config.save_epochs == 0:
+        # Log reconstructions every epoch
+        if (epoch + 1) % 1 == 0:
             log_reconstructions(model, next(iter(val_loader)).to(device), epoch)
         
-        # Save regular checkpoint every 5 epochs
+        # Save regular checkpoint every n epochs
         if (epoch + 1) % config.save_epochs == 0:
-            checkpoint_path = checkpoint_dir / f"checkpoints/{wandb.run.name}/checkpoint_epoch_{epoch+1}.pt"
+            checkpoint_path = checkpoint_dir / f"checkpoints/{wandb.run.name}_checkpoint_epoch_{epoch+1}.pt"
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
+                'scaler_state_dict': scaler.state_dict(),  # Save scaler state
                 'val_loss': avg_val_loss,
                 'best_val_loss': best_val_loss,
                 'config': config,
@@ -221,19 +243,20 @@ def train_vae(config: VAEConfig, h5_files, run_name=None, checkpoint_dir="checkp
             wandb.save(str(checkpoint_path),base_path=checkpoint_dir)
             
             # Keep only the last 3 checkpoints to save space
-            checkpoint_files = sorted(checkpoint_dir.glob(f"checkpoints/{wandb.run.name}/checkpoint_epoch_*.pt"))
+            checkpoint_files = sorted(checkpoint_dir.glob(f"checkpoints/{wandb.run.name}_checkpoint_epoch_*.pt"))
             if len(checkpoint_files) > 3:
                 checkpoint_files[0].unlink()  # Remove oldest checkpoint
         
         # Save best model
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            best_model_path = checkpoint_dir / f"checkpoints/{wandb.run.name}/best.pt"
+            best_model_path = checkpoint_dir / f"checkpoints/{wandb.run.name}_best.pt"
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
+                'scaler_state_dict': scaler.state_dict(),
                 'val_loss': best_val_loss,
                 'config': config,
             }, best_model_path)
@@ -248,7 +271,7 @@ def train_vae(config: VAEConfig, h5_files, run_name=None, checkpoint_dir="checkp
     wandb.finish()
     return best_val_loss
 
-def hyperparameter_sweep():
+def hyperparameter_sweep(h5_files):
     """Run hyperparameter sweep with different configurations"""
     # Define hyperparameter search space
     hp_space = {
@@ -345,11 +368,14 @@ if __name__ == "__main__":
             input_size=256,
             latent_dim=256,
             hidden_dims=[32, 64, 128, 256],
-            max_lr=1e-3,
+            max_lr=1e-4,
             kld_weight=0.2,
             epochs=3,
-            save_epochs=1
+            save_epochs=1,
+            minibatch_size= 32,
+            minibatch_num= 4
         )
         train_vae(config, args.h5_files, 
                 checkpoint_dir=args.checkpoint_dir,
+                run_name="trash",
                 resume_from=args.resume_from)

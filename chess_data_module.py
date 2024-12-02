@@ -7,39 +7,47 @@ from typing import List, Optional
 class Chess_Image_Dataset(Dataset):
     def __init__(self, h5_files: List[str]):
         """
-        Dataset for chess images stored in H5 files
+        Creats a Dataset from chess images stored in H5 files
         
         Args:
             h5_files: List of paths to H5 files
         """
         self.h5_files = [Path(f) for f in h5_files]
+        # Keep file handles open during dataset lifetime
+        self.file_handles = []
         
         # Get total size and file mappings
         self.size = 0
         self.file_mappings = []  # (file_idx, internal_idx)
         
         for file_idx, h5_file in enumerate(self.h5_files):
-            with h5py.File(h5_file, 'r') as f:
-                n_images = len(f['images'])
-                self.file_mappings.extend([(file_idx, i) for i in range(n_images)])
-                self.size += n_images
+            handle = h5py.File(h5_file, 'r')
+            self.file_handles.append(handle)
+            n_images = len(handle['images'])
+            self.file_mappings.extend([(file_idx, i) for i in range(n_images)])
+            self.size += n_images
     
     def __len__(self) -> int:
         return self.size
     
     def __getitem__(self, idx: int) -> torch.Tensor:
         file_idx, internal_idx = self.file_mappings[idx]
-        h5_file = self.h5_files[file_idx]
         
-        # Read image from H5 (gzip decompression handled automatically by h5py)
-        with h5py.File(h5_file, 'r') as f:
-            image = f['images'][internal_idx]
+        # Get image from open file handle instead of opening/closing
+        image = self.file_handles[file_idx]['images'][internal_idx]
         
         # Convert to torch tensor and normalize
         image = torch.from_numpy(image).float()
         image = image / 255.0  # Normalize to [0, 1]
             
         return image
+
+    
+    # CHANGE: Added cleanup method
+    def __del__(self):
+        """Cleanup open file handles"""
+        for handle in self.file_handles:
+            handle.close()
 
 class Chess_Data_Module:
     def __init__(
