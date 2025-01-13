@@ -5,7 +5,37 @@ from dataclasses import dataclass
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import OneCycleLR
 
+
+@dataclass
+class VAEConfig:
+    """Parameters of the VAE Architecture"""
+    input_size: int = 256 #number of pixels in the image
+    in_channels: int = 3  #number of input channcels (3 -> for RGB)
+    latent_dim: int = 256 #latent dimensions between the encoder and decoder
+    hidden_dims: list = None
+    max_lr: float = 1e-3    #maximum learning rate
+    kld_weight: float = 0.2 #beta regularization of the kld loss
+    negative_slope: float = 0.1 #leaky relu slope
+    weight_decay: float = 1e-6 #weight decay regularization for adam
+    adamw_betas: tuple = (0.9, 0.999) #beta params for weight decay
+    epochs: int = 10
+    minibatch_size: int = 32
+    minibatch_num: int = 4 #batch = minibatch size*num
+    val_split: float = 0.1
+    #num_workers: int = 3
+    save_epochs: int = 5   #save to weights every _ epochs
+    warmup_ratio: float = 0.3  # Spend 30% of training in warmup
+    div_factor: int = 25  # initial_lr = max_lr/25
+    final_div_factor: int = 1000  # final_lr = initial_lr/1000
+    anneal_strategy: chr = 'cos'
+
+    def __post_init__(self):
+        if self.hidden_dims is None:
+            self.hidden_dims = [32, 64, 128, 256] #number of hidden dims/channels between each convolutional layer
+
+
 class ConvBlock(nn.Module):
+    """The encoder layer is made entirely of"""
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, negative_slope = 0.01):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
@@ -14,32 +44,6 @@ class ConvBlock(nn.Module):
 
     def forward(self, x):
         return self.leaky_relu(self.in_norm(self.conv(x)))
-
-@dataclass
-class VAEConfig:
-    input_size: int = 256
-    in_channels: int = 3
-    latent_dim: int = 256
-    hidden_dims: list = None
-    max_lr: float = 1e-3
-    kld_weight: float = 0.2
-    negative_slope: float = 0.1
-    weight_decay: float = 1e-6
-    adamw_betas: tuple = (0.9, 0.999)
-    epochs: int = 10
-    minibatch_size: int = 32
-    minibatch_num: int = 4
-    val_split: float = 0.1
-    num_workers: int = 3
-    save_epochs: int = 5
-    warmup_ratio: float = 0.3  # Spend 30% of training in warmup
-    div_factor: int = 25  # initial_lr = max_lr/25
-    final_div_factor: int = 1000  # final_lr = initial_lr/1000
-    anneal_strategy: chr = 'cos'
-
-    def __post_init__(self):
-        if self.hidden_dims is None:
-            self.hidden_dims = [32, 64, 128, 256]
 
 class ChessVAE(nn.Module):
     def __init__(self, config: VAEConfig):
